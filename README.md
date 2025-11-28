@@ -10,7 +10,7 @@ For experimentation, a basic tier Service Bus instance will do. It's still not c
 
 The main solution `servicebusanddataverse` consists of a few components only:
 
-* two connection references, one for Dataverse and one for Service Nus.
+* two connection references, one for Dataverse and one for Service Bus.
 * three flows, two for manually publishing messages and the main one is to consume and process messages.
 
 ### Export and store solution in source control
@@ -37,26 +37,26 @@ The trigger is set to `When one or more messages arrive in a queue (peek-lock)`;
 
 The main block of the flow is an `apply to each` action on the trigger output. For each message received, the loop
 
-    decodes the incoming message using `base64ToString`
-    parses the decoded message as JSON that expects 3 string properties: lastName, firstName and entityID
-    finds the first contact in the contact table by filtering on entityid
-    if the contact is found, it updates the first and last name columns
-    if the contact is not found, it creates the contact using the 3 properties received in the message
-    complete the service bus message i.e. removes it from the queue
+* decodes the incoming message using `base64ToString`
+* parses the decoded message as JSON that expects 3 string properties: lastName, firstName and entityID
+* finds the first contact in the contact table by filtering on entityid
+* if the contact is found, it updates the first and last name columns
+* if the contact is not found, it creates the contact using the 3 properties received in the message
+* complete the service bus message i.e. removes it from the queue
 
-The above actions are in a Scope called Try. We also have another context called Catch inside the `apply to each` action which runs after the Try context if Try has timed out or has failed. This is a well-established try-catch error handling pattern used in Power Automate flows.
+The above actions are in a Scope called Try. We also have another Scope called Catch inside the `apply to each` action which runs after the Try Scope if Try has timed out or has failed. This is a well-established try-catch error handling pattern used in Power Automate flows.
 
-In the Catch context, we have a few actions that take care of error handling, specifically
+In the Catch Scope, we have a few actions that take care of error handling, specifically
 
-    extracts output of the Try context and capture the action that failed or timed out
-    stores the name and error output of the action in an array
-    moves the current service bus message into the dead-letter queue
+* extracts output of the Try Scope and captures the action that failed or timed out
+* stores the name and error output of the action in an array
+* moves the current service bus message into the dead-letter queue
 
 After the Apply to each action
 
-    a condition checks if we have at least one error in the array
-    if yes, we execute a compose action so that the error array content becomes part of the run log
-    execute a Terminate flow action that sets the flow run's status to Failed
+* a condition checks if we have at least one error in the array
+* if yes, we execute a compose action so that the error array content becomes part of the run log
+* execute a Terminate flow action that sets the flow run's status to Failed
 
 ### Example test runs
 
