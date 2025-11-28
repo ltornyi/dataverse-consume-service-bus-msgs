@@ -1,0 +1,301 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_servicebus_1": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "ltornyi_sharedservicebus_c34db"
+        },
+        "api": {
+          "name": "shared_servicebus"
+        }
+      },
+      "shared_commondataserviceforapps-1": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "ltornyi_sharedcommondataserviceforapps_c8c07"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        }
+      },
+      "triggers": {
+        "When_one_or_more_messages_arrive_in_a_queue_(peek-lock)": {
+          "recurrence": {
+            "interval": 1,
+            "frequency": "Minute"
+          },
+          "type": "OpenApiConnection",
+          "inputs": {
+            "parameters": {
+              "queueName": "contacts",
+              "queueType": "Main",
+              "sessionId": "None",
+              "maxMessageCount": 50
+            },
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_servicebus",
+              "operationId": "GetNewMessagesFromQueueWithPeekLock",
+              "connectionName": "shared_servicebus_1"
+            }
+          }
+        }
+      },
+      "actions": {
+        "Apply_to_each": {
+          "foreach": "@triggerBody()",
+          "actions": {
+            "try": {
+              "actions": {
+                "Parse_JSON": {
+                  "type": "ParseJson",
+                  "inputs": {
+                    "content": "@base64ToString(items('Apply_to_each')?['ContentData'])",
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "lastName": {
+                          "type": "string"
+                        },
+                        "firstName": {
+                          "type": "string"
+                        },
+                        "entityID": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "List_rows": {
+                  "runAfter": {
+                    "Parse_JSON": [
+                      "Succeeded"
+                    ]
+                  },
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "parameters": {
+                      "entityName": "contacts",
+                      "$select": "contactid",
+                      "$filter": "ltornyi_entityid eq '@{body('Parse_JSON')?['entityID']}'",
+                      "$top": 1
+                    },
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                      "operationId": "ListRecords",
+                      "connectionName": "shared_commondataserviceforapps-1"
+                    }
+                  }
+                },
+                "contact_found": {
+                  "actions": {
+                    "Update_contact": {
+                      "type": "OpenApiConnection",
+                      "inputs": {
+                        "parameters": {
+                          "entityName": "contacts",
+                          "recordId": "@first(outputs('List_rows')?['body/value'])?['contactid']",
+                          "item/firstname": "@body('Parse_JSON')?['firstName']",
+                          "item/lastname": "@body('Parse_JSON')?['lastName']"
+                        },
+                        "host": {
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                          "operationId": "UpdateOnlyRecord",
+                          "connectionName": "shared_commondataserviceforapps-1"
+                        }
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "List_rows": [
+                      "Succeeded"
+                    ]
+                  },
+                  "else": {
+                    "actions": {
+                      "Create_contact": {
+                        "type": "OpenApiConnection",
+                        "inputs": {
+                          "parameters": {
+                            "entityName": "contacts",
+                            "item/lastname": "@body('Parse_JSON')?['lastName']",
+                            "item/firstname": "@body('Parse_JSON')?['firstName']",
+                            "item/ltornyi_entityid": "@body('Parse_JSON')?['entityID']"
+                          },
+                          "host": {
+                            "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps",
+                            "operationId": "CreateRecord",
+                            "connectionName": "shared_commondataserviceforapps-1"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "expression": {
+                    "and": [
+                      {
+                        "equals": [
+                          "@length(outputs('List_rows')?['body/value'])",
+                          1
+                        ]
+                      }
+                    ]
+                  },
+                  "type": "If"
+                },
+                "Complete_the_contact_message": {
+                  "runAfter": {
+                    "contact_found": [
+                      "Succeeded"
+                    ]
+                  },
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "parameters": {
+                      "queueName": "contacts",
+                      "lockToken": "@items('Apply_to_each')?['LockToken']",
+                      "queueType": "Main",
+                      "sessionId": "@items('Apply_to_each')?['SessionId']"
+                    },
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_servicebus",
+                      "operationId": "CompleteMessageInQueue",
+                      "connectionName": "shared_servicebus_1"
+                    }
+                  }
+                }
+              },
+              "type": "Scope"
+            },
+            "catch": {
+              "actions": {
+                "Dead-letter_the_contact_message": {
+                  "runAfter": {
+                    "Append_action_name_and_error_message_to_error_array": [
+                      "Succeeded"
+                    ]
+                  },
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "parameters": {
+                      "queueName": "contacts",
+                      "lockToken": "@items('Apply_to_each')?['LockToken']",
+                      "sessionId": "@items('Apply_to_each')?['SessionId']",
+                      "deadLetterReason": "@first(outputs('Filter_result_of_try')['body'])?['name']",
+                      "deadLetterErrorDescription": "@first(outputs('Filter_result_of_try')['body'])?['error']?['message']"
+                    },
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_servicebus",
+                      "operationId": "DeadLetterMessageInQueue",
+                      "connectionName": "shared_servicebus_1"
+                    }
+                  }
+                },
+                "Filter_result_of_try": {
+                  "type": "Query",
+                  "inputs": {
+                    "from": "@result('try')",
+                    "where": "@or(equals(item()?['Status'], 'Failed'),equals(item()?['Status'], 'TimedOut'))"
+                  }
+                },
+                "Append_action_name_and_error_message_to_error_array": {
+                  "runAfter": {
+                    "Filter_result_of_try": [
+                      "Succeeded"
+                    ]
+                  },
+                  "type": "AppendToArrayVariable",
+                  "inputs": {
+                    "name": "errors",
+                    "value": "@concat('action:', first(outputs('Filter_result_of_try')['body'])?['name'], ',error:', first(outputs('Filter_result_of_try')['body'])?['error']?['message'])"
+                  }
+                }
+              },
+              "runAfter": {
+                "try": [
+                  "Failed",
+                  "TimedOut"
+                ]
+              },
+              "type": "Scope"
+            }
+          },
+          "runAfter": {
+            "Initialize_errors_array": [
+              "Succeeded"
+            ]
+          },
+          "type": "Foreach"
+        },
+        "Initialize_errors_array": {
+          "runAfter": {},
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "errors",
+                "type": "array",
+                "value": []
+              }
+            ]
+          }
+        },
+        "we_had_errors": {
+          "actions": {
+            "fail_the_flow_run": {
+              "runAfter": {
+                "Compose_error_array": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed"
+              }
+            },
+            "Compose_error_array": {
+              "type": "Compose",
+              "inputs": "@variables('errors')"
+            }
+          },
+          "runAfter": {
+            "Apply_to_each": [
+              "Succeeded"
+            ]
+          },
+          "else": {
+            "actions": {}
+          },
+          "expression": {
+            "and": [
+              {
+                "greater": [
+                  "@length(variables('errors'))",
+                  0
+                ]
+              }
+            ]
+          },
+          "type": "If"
+        }
+      }
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}

@@ -1,0 +1,126 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_servicebus_1": {
+        "runtimeSource": "invoker",
+        "connection": {
+          "connectionReferenceLogicalName": "ltornyi_sharedservicebus_c34db"
+        },
+        "api": {
+          "name": "shared_servicebus"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        }
+      },
+      "triggers": {
+        "manual": {
+          "metadata": {
+            "operationMetadataId": "130fc254-8861-4ca1-b0ec-5007b363f436"
+          },
+          "type": "Request",
+          "kind": "Button",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "number": {
+                  "description": "Please enter a number",
+                  "title": "number of messages",
+                  "type": "number",
+                  "x-ms-content-hint": "NUMBER",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "required": [
+                "number"
+              ]
+            }
+          }
+        }
+      },
+      "actions": {
+        "Do_until": {
+          "actions": {
+            "Increment_counter": {
+              "type": "IncrementVariable",
+              "inputs": {
+                "name": "counter",
+                "value": 1
+              }
+            },
+            "Compose_message": {
+              "runAfter": {
+                "Increment_counter": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Compose",
+              "inputs": "@concat('{\"firstName\":\"first',variables('counter'),'\",\"lastName\":\"last',variables('counter'),'\",\"entityID\":\"',variables('counter'),'\"}')"
+            },
+            "Send_message": {
+              "runAfter": {
+                "Compose_message": [
+                  "Succeeded"
+                ]
+              },
+              "metadata": {
+                "operationMetadataId": "0de26ca5-96a3-49ce-ba03-d5c20821efc0"
+              },
+              "type": "OpenApiConnection",
+              "inputs": {
+                "parameters": {
+                  "entityName": "contacts",
+                  "systemProperties": "None",
+                  "message/ContentData": "@outputs('Compose_message')",
+                  "message/ContentType": "application/json"
+                },
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_servicebus",
+                  "operationId": "SendMessage",
+                  "connectionName": "shared_servicebus_1"
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Initialize_counter": [
+              "Succeeded"
+            ]
+          },
+          "expression": "@greaterOrEquals(variables('counter'),triggerBody()?['number'])",
+          "limit": {
+            "timeout": "PT1H"
+          },
+          "type": "Until"
+        },
+        "Initialize_counter": {
+          "runAfter": {},
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "counter",
+                "type": "integer",
+                "value": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}
